@@ -16,7 +16,7 @@ class Cache(cfg: CacheConfig) extends Component {
    * @return
    */
   protected def getBlockAddr(inputAddr: UInt): UInt = {
-    inputAddr(log2Up(cfg.dataWidth)+log2Up(cfg.cacheBlockNum)+log2Up(cfg.cacheBlockSize)-1 downto (log2Up(cfg.dataWidth)+log2Up(cfg.cacheBlockSize)))
+    inputAddr(log2Up(cfg.getByteSize)+log2Up(cfg.cacheBlockNum)+log2Up(cfg.cacheBlockSize)-1 downto (log2Up(cfg.getByteSize)+log2Up(cfg.cacheBlockSize)))
   }
 
   /**
@@ -25,7 +25,7 @@ class Cache(cfg: CacheConfig) extends Component {
    * @return Bit position of offset
    */
   protected def getBlockOffset(inputAddr: UInt): UInt = {
-    inputAddr(log2Up(cfg.dataWidth)+log2Up(cfg.cacheBlockSize)-1 downto log2Up(cfg.dataWidth)) << log2Up(cfg.dataWidth)
+    inputAddr(log2Up(cfg.getByteSize)+log2Up(cfg.cacheBlockSize)-1 downto log2Up(cfg.getByteSize)) << log2Up(cfg.dataWidth)
   }
 
   /**
@@ -34,7 +34,7 @@ class Cache(cfg: CacheConfig) extends Component {
    * @return Offset number in word
    */
   protected def getBlockOffsetWord(inputAddr: UInt): UInt = {
-    inputAddr(log2Up(cfg.dataWidth)+log2Up(cfg.cacheBlockSize)-1 downto log2Up(cfg.dataWidth))
+    inputAddr(log2Up(cfg.getByteSize)+log2Up(cfg.cacheBlockSize)-1 downto log2Up(cfg.getByteSize))
   }
 
   /**
@@ -43,7 +43,7 @@ class Cache(cfg: CacheConfig) extends Component {
    * @return flag field
    */
   protected def getBlockFlag(inputAddr: UInt): Bits = {
-    inputAddr(cfg.addrWidth-1 downto ( cfg.addrWidth-log2Up(cfg.getFlagWidth) )).asBits
+    inputAddr(cfg.addrWidth-1 downto ( cfg.addrWidth-cfg.getFlagWidth )).asBits
   }
 
   /**
@@ -53,7 +53,7 @@ class Cache(cfg: CacheConfig) extends Component {
    * @return data word field
    */
   protected def getBlockWord(blockData: Bits, offset: UInt): Bits = {
-    blockData >> offset
+    ( blockData >> offset ).resize(cfg.dataWidth)
   }
 
   /**
@@ -71,20 +71,35 @@ class Cache(cfg: CacheConfig) extends Component {
    * write the aux data of the read address channel
    */
   protected def writeArAuxData(): Unit = {
-    io.cacheBus.ar.burst := Axi4.burst.WRAP
+    io.cacheBus.aw.valid.clear()
+    io.cacheBus.w.valid.clear()
+    io.cacheBus.ar.burst := Axi4.burst.INCR
     io.cacheBus.ar.size  := U(log2Up(cfg.dataWidth/8))
-    io.cacheBus.ar.len   := U(cfg.cacheBlockSize)
+    io.cacheBus.ar.len   := U(cfg.cacheBlockSize - 1)
     io.cacheBus.ar.cache := Axi4.arcache.BUFFERABLE
+    io.cacheBus.ar.addr  := 0
+    io.cacheBus.ar.lock  := Axi4.lock.EXCLUSIVE
+    io.cacheBus.ar.prot  := 0
+    io.cacheBus.ar.id    := 0
   }
 
   /**
    * write the aux data of the write address channel
    */
   protected def writeAwAuxData(): Unit = {
-    io.cacheBus.aw.burst := Axi4.burst.WRAP
+    io.cacheBus.ar.valid.clear()
+    io.cacheBus.aw.addr  := 0
+    io.cacheBus.aw.id    := 0
+    io.cacheBus.aw.burst := Axi4.burst.INCR
     io.cacheBus.aw.size  := U(log2Up(cfg.dataWidth/8))
-    io.cacheBus.aw.len   := U(cfg.cacheBlockSize)
+    io.cacheBus.aw.len   := U(cfg.cacheBlockSize - 1)
     io.cacheBus.aw.cache := Axi4.awcache.BUFFERABLE
+    io.cacheBus.aw.lock  := Axi4.lock.EXCLUSIVE
+    io.cacheBus.aw.prot  := 0
+    io.cacheBus.w.data   := 0
+    io.cacheBus.w.last   := False
+    io.cacheBus.w.strb   := B"1111"
+    io.cacheBus.b.ready  := True
   }
 
 }
