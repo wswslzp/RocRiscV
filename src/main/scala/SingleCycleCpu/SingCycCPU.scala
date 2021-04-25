@@ -1,4 +1,4 @@
-package SingleCycle
+package SingleCycleCpu
 
 import spinal.core._
 import spinal.lib._
@@ -139,7 +139,7 @@ case class SingCycCPU(cfg: RocRvConfig) extends Component {
     memAccess.memToReg := decode.opcode === B"0100011" // store
     regFile.we := (decode.opcode === B"0000011") || (decode.opcode === B"0110011") // R or load
     memAccess.en := alu.srcSel
-    memAccess.wr := memAccess.memToReg
+    memAccess.wr := ~memAccess.memToReg
     fetch.nextPcIsBranch := (decode.opcode === B"1100011") && alu.zero // branch
     when(decode.opcode === B"0000011"){
       decode.aluCtrl.op := B"2'b10"

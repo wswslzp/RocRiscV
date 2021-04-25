@@ -12,3 +12,4 @@ test:runMain HexToolTest
 ?veri
 test:runMain HexToolTest
 runMain SingleCycle.SingCycCPU
+compile

@@ -1,0 +1,12 @@
+
+t2.out:     file format elf64-littleriscv
+
+
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:	40308133          	sub	sp,ra,gp
+   4:	00517633          	and	a2,sp,t0
+   8:	002366b3          	or	a3,t1,sp
+   c:	00210733          	add	a4,sp,sp
+  10:	06f13223          	sd	a5,100(sp)
