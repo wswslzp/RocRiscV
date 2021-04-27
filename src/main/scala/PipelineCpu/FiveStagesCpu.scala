@@ -10,7 +10,6 @@ import Config._
  * @param cfg
  */
 case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
-  concatStage()
   import DecodingMethod._
   import RiscVISA._
   import ALU_CTRL_CMD._

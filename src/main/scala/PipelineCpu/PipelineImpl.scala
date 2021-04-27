@@ -10,8 +10,21 @@ class StageReg[T <: Data](_dataType: => T) extends HardType[T](_dataType) with N
   setWeakName(this.getClass.getSimpleName.replace("$", ""))
 }
 
+case class StageRegProperty[T <: Data](
+                           var hardReg: T,
+                           var assignment: () => T = null,
+                           var flushSignal: Bool = null,
+                           var stallSignal: Bool = null,
+                           var startPrevStage: Stage = null
+                           ){
+  def isAssigned: Boolean = assignment != null
+  def isFlushable: Boolean = flushSignal != null
+  def isStallable: Boolean = stallSignal != null
+  def hasUnusedStage: Boolean = startPrevStage != null
+}
+
 class Stage extends Nameable {
-  private val regMaps = mutable.HashMap[StageReg[Data], Data]()
+  private val regProperty = mutable.HashMap[StageReg[Data], StageRegProperty[Data]]()
   private var nextStage: Stage = _
   private var prevStage: Stage = _
 
@@ -21,62 +34,114 @@ class Stage extends Nameable {
   def setPrevStage(stage: Stage): Unit = {
     prevStage = stage
   }
+
   def isFirstStage = prevStage == null
   def isLastStage = nextStage == null
-  def add[T <: Data](reg: StageReg[T])(output: => T): Stage = {
-    if(regMaps.contains(reg.asInstanceOf[StageReg[Data]])) {
-      purifyReg(reg)
-      regMaps(reg.asInstanceOf[StageReg[Data]]).setAsReg() := output
+
+  def add[T <: Data](reg: StageReg[T])(output: T): Stage = {
+    if(regProperty.contains(reg.asInstanceOf[StageReg[Data]])) {
+      regProperty(reg.asInstanceOf[StageReg[Data]]).assignment = () => output
+      regProperty(reg.asInstanceOf[StageReg[Data]]).startPrevStage = prevStage
     }
     else {
       // note: don't use cloneOf(output) to take place of reg().
       //  Replicated redundant logic will be generated!!
       val outputReg = Reg(reg()).setPartialName(this, reg.getName())
-      outputReg := output
-      regMaps += reg.asInstanceOf[StageReg[Data]] -> outputReg
+      regProperty += reg.asInstanceOf[StageReg[Data]] -> StageRegProperty(outputReg, ()=>output).asInstanceOf[StageRegProperty[Data]]
     }
     this
   }
+
   def get[T <: Data](reg: StageReg[T]): T = {
-    regMaps.getOrElseUpdate(reg.asInstanceOf[StageReg[Data]], defaultValue = {
+    regProperty.getOrElseUpdate(reg.asInstanceOf[StageReg[Data]], defaultValue = {
       if(isFirstStage){
         SpinalWarning(s"The reg `${reg.getName()}` has not been created before and the assignment may be incomplete.")
         val newReg = Reg(reg()).setPartialName(this, reg.getName())
         newReg.allowPruning().allowSimplifyIt()
-        newReg
+        SpinalInfo(s"Create new reg ${reg.getName()} at the beginning.")
+        StageRegProperty(newReg)
       } else {
         val prevReg = prevStage.get(reg)
         val currReg = Reg(reg()).setPartialName(this, reg.getName())
-        currReg := prevReg // todo Directly assignment leads to error when `get` is invoked before `add`
-        currReg
+        SpinalInfo(s"Get stage reg ${reg.getName()} at ${this.getName()}")
+        StageRegProperty(currReg, ()=>prevReg)
       }
-    }).asInstanceOf[T]
+    }).hardReg.asInstanceOf[T]
   }
+
+  def stallBy[T <: Data](reg: StageReg[T])(sig: => Bool): Stage = {
+    regProperty(reg.asInstanceOf[StageReg[Data]]).stallSignal = sig
+    this
+  }
+  def stallBy(sig: =>Bool): Stage = {
+    regProperty.valuesIterator.foreach(_.stallSignal = sig)
+    this
+  }
+
+  def flushBy[T <: Data](reg: StageReg[T])(sig: => Bool): Stage = {
+    regProperty(reg.asInstanceOf[StageReg[Data]]).flushSignal = sig
+    this
+  }
+  def flushBy(sig: => Bool): Stage = {
+    regProperty.valuesIterator.foreach(_.flushSignal = sig)
+    this
+  }
+
   def purifyReg[T <: Data](reg: StageReg[T]): Stage = {
-    if(regMaps.contains(reg.asInstanceOf[StageReg[Data]])) {
-      if(!isFirstStage && prevStage.regMaps.contains(reg.asInstanceOf[StageReg[Data]])) {
+    if(regProperty.contains(reg.asInstanceOf[StageReg[Data]])) {
+      if(!isFirstStage && prevStage.regProperty.contains(reg.asInstanceOf[StageReg[Data]])) {
         prevStage.purifyReg(reg)
       }
-      regMaps(reg.asInstanceOf[StageReg[Data]]).purify()
+      regProperty(reg.asInstanceOf[StageReg[Data]]).hardReg.purify()
     }
     this
   }
-  @deprecated("Now using `get` method can automatically pass next.")
-  def passNext[T <: Data](reg: StageReg[T]): Stage = {
-    nextStage.add(reg){
-      get[T](reg)
+
+  def build(): Unit = {
+    // todo: here we solve the problem of missing assignments,
+    //  but introducing a hidden danger of making replicated logic.
+    regProperty.valuesIterator.filter(_.isAssigned).map(_.assignment).foreach(op => op())
+    regProperty.valuesIterator.filter(_.isAssigned).foreach { p =>
+      val hReg = p.hardReg
+      val op = p.assignment
+      (p.isStallable, p.isFlushable) match {
+        case (false, false) =>
+          hReg := op()
+        case (false, true) =>
+          when(p.flushSignal) {
+            hReg := hReg.getZero
+          } otherwise (
+            hReg := op()
+          )
+        case (true, false) =>
+          when(!p.stallSignal) {
+            hReg := op()
+          }
+        case (true, true) =>
+          when(p.flushSignal) {
+            hReg := hReg.getZero
+          } elsewhen (!p.stallSignal) {
+            hReg := op()
+          }
+      }
+      regProperty.keysIterator.filter(r=> regProperty(r).hasUnusedStage).foreach{ sReg=>
+        SpinalInfo(s"${sReg.getName()} start at ${this.getName()}")
+        regProperty(sReg).startPrevStage.purifyReg(sReg)
+      }
     }
   }
 }
 
-trait PipelineImpl extends Nameable {
+trait PipelineImpl {
   val stage: Vector[Stage]
   def concatStage(): Unit = stage.dropRight(1).zip(stage.drop(1)).foreach{case(cur, nex)=>
     cur.setNextStage(nex)
     nex.setPrevStage(cur)
   }
 
-  Component.current.addPrePopTask(() => concatStage())
+  Component.current.addPrePopTask(() => {
+    stage.foreach(_.build())
+  })
 }
 
 object PipelineTest {
@@ -89,6 +154,9 @@ object PipelineTest {
       val data_c = out Bits(16 bit)
       val data_d = out Bits(16 bit)
       val data_e = out Bool() allowPruning() allowSimplifyIt()
+      val stall_0 = in Bool()
+      val stall_1 = in Bool()
+      val flush_3 = in Bool()
     }
 
     object regA extends StageReg(cloneOf(io.data_a))
@@ -102,11 +170,17 @@ object PipelineTest {
     stage(2).add(regE){io.data_b}
 
     stage.last.add(regC){
-      stage.head.get(regB) ? stage.head.get(regA)(31 downto 16) | stage.head.get(regA)(15 downto 0)
+      stage(3).get(regB) ? stage(3).get(regA)(31 downto 16) | stage(3).get(regA)(15 downto 0)
     }
     stage.last.add(regD){
-      stage.head.get(regA).subdivideIn(2 slices).reduce(_ | _)
+      stage(3).get(regA).subdivideIn(2 slices).reduce(_ | _)
     }
+
+    stage(0).stallBy(io.stall_0)
+    stage(1).stallBy(regA)(io.stall_1)
+    stage(1).stallBy(regB)(io.stall_1)
+    stage(3).flushBy(regA)(io.flush_3)
+    stage.last.flushBy(io.flush_3 & io.stall_1)
 
     io.data_c := stage.last.get(regC)
     io.data_d := stage.last.get(regD)
