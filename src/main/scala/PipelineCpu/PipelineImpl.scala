@@ -58,12 +58,10 @@ class Stage extends Nameable {
         SpinalWarning(s"The reg `${reg.getName()}` has not been created before and the assignment may be incomplete.")
         val newReg = Reg(reg()).setPartialName(this, reg.getName())
         newReg.allowPruning().allowSimplifyIt()
-        SpinalInfo(s"Create new reg ${reg.getName()} at the beginning.")
         StageRegProperty(newReg)
       } else {
         val prevReg = prevStage.get(reg)
         val currReg = Reg(reg()).setPartialName(this, reg.getName())
-        SpinalInfo(s"Get stage reg ${reg.getName()} at ${this.getName()}")
         StageRegProperty(currReg, ()=>prevReg)
       }
     }).hardReg.asInstanceOf[T]
@@ -125,7 +123,6 @@ class Stage extends Nameable {
           }
       }
       regProperty.keysIterator.filter(r=> regProperty(r).hasUnusedStage).foreach{ sReg=>
-        SpinalInfo(s"${sReg.getName()} start at ${this.getName()}")
         regProperty(sReg).startPrevStage.purifyReg(sReg)
       }
     }
