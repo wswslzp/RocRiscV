@@ -19,6 +19,10 @@ object VarCirTest extends App{
     io.xout := tmp
   }
 
+//  def sumation(num: Int*): Int = {
+//    num.foreach()
+//  }
+
   new File("rtl").mkdir()
   SpinalConfig(targetDirectory = "rtl").generateVerilog(VarCir(4))
 }

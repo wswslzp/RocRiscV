@@ -5,7 +5,8 @@ import spinal.lib._
 
 import scala.collection.mutable
 
-class StageReg[T <: Data](_dataType: => T) extends HardType[T](_dataType) with Nameable {
+sealed trait StageRegCommonType
+class StageReg[T <: Data](_dataType: => T) extends HardType[T](_dataType) with Nameable with StageRegCommonType {
   def dataType: T = apply()
   setWeakName(this.getClass.getSimpleName.replace("$", ""))
 }
@@ -67,8 +68,11 @@ class Stage extends Nameable {
     }).hardReg.asInstanceOf[T]
   }
 
-  def stallBy[T <: Data](reg: StageReg[T])(sig: => Bool): Stage = {
-    regProperty(reg.asInstanceOf[StageReg[Data]]).stallSignal = sig
+  def stallBy(reg: StageRegCommonType*)(sig: => Bool): Stage = {
+    reg.foreach{sReg=>
+      require(regProperty.contains(sReg.asInstanceOf[StageReg[Data]]))
+      regProperty(sReg.asInstanceOf[StageReg[Data]]).stallSignal = sig
+    }
     this
   }
   def stallBy(sig: =>Bool): Stage = {
@@ -76,8 +80,11 @@ class Stage extends Nameable {
     this
   }
 
-  def flushBy[T <: Data](reg: StageReg[T])(sig: => Bool): Stage = {
-    regProperty(reg.asInstanceOf[StageReg[Data]]).flushSignal = sig
+  def flushBy(reg: StageRegCommonType*)(sig: => Bool): Stage = {
+    reg.foreach{sReg=>
+      require(regProperty.contains(sReg.asInstanceOf[StageReg[Data]]))
+      regProperty(sReg.asInstanceOf[StageReg[Data]]).flushSignal = sig
+    }
     this
   }
   def flushBy(sig: => Bool): Stage = {
@@ -101,6 +108,9 @@ class Stage extends Nameable {
     regProperty.valuesIterator.filter(_.isAssigned).map(_.assignment).foreach(op => op())
     regProperty.valuesIterator.filter(_.isAssigned).foreach { p =>
       val hReg = p.hardReg
+      // NOTE: To prevent from scope violation occurs in the `when` context,
+      //  this statement has to be added!
+      hReg.parentScope = Component.current.dslBody
       val op = p.assignment
       (p.isStallable, p.isFlushable) match {
         case (false, false) =>
@@ -151,6 +161,7 @@ object PipelineTest {
       val data_c = out Bits(16 bit)
       val data_d = out Bits(16 bit)
       val data_e = out Bool() allowPruning() allowSimplifyIt()
+      val data_f = out Bool()
       val stall_0 = in Bool()
       val stall_1 = in Bool()
       val flush_3 = in Bool()
@@ -166,6 +177,12 @@ object PipelineTest {
     io.data_e := stage.last.get(regE)
     stage(2).add(regE){io.data_b}
 
+    val e_r = RegInit(False)
+    io.data_f := False
+    when(stage(1).get(regA) =/= 0){
+      io.data_f := stage(0).get(regB) ? stage(2).get(regA).msb | stage(2).get(regA).lsb
+    }
+
     stage.last.add(regC){
       stage(3).get(regB) ? stage(3).get(regA)(31 downto 16) | stage(3).get(regA)(15 downto 0)
     }
@@ -174,8 +191,7 @@ object PipelineTest {
     }
 
     stage(0).stallBy(io.stall_0)
-    stage(1).stallBy(regA)(io.stall_1)
-    stage(1).stallBy(regB)(io.stall_1)
+    stage(1).stallBy(regA, regB)(io.stall_1)
     stage(3).flushBy(regA)(io.flush_3)
     stage.last.flushBy(io.flush_3 & io.stall_1)
 

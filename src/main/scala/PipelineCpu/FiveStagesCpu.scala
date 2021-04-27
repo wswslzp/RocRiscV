@@ -18,7 +18,9 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
   object PC extends StageReg(UInt(cfg.addrWidth bit))
   // IDEX
   object RS1 extends StageReg(Bits(cfg.dataWidth bit))
+  object RS1Num extends StageReg(UInt(5 bit))
   object RS2 extends StageReg(Bits(cfg.dataWidth bit))
+  object RS2Num extends StageReg(UInt(5 bit))
   object RDNum extends StageReg(UInt(5 bit))
   object IMM_I extends StageReg(Bits(12 bit))
   object IMM_S extends StageReg(Bits(12 bit))
@@ -58,7 +60,10 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val instrFromCache = instructionCache.readAsync((pc >> 2).resized)
     val naturalNextPc = pc + 4
     val nextPcIsBranch = EXMEM.get(BRANCH) && EXMEM.get(BRANCH_ASSERT) // Only for `BEQ`
-    pc := nextPcIsBranch ? EXMEM.get(BRANCH_ADDR) | naturalNextPc
+    val loadStall = Bool()
+    when(!loadStall){ // todo: `get` method occurs in when context will produce scope violation!!
+      pc := nextPcIsBranch ? EXMEM.get(BRANCH_ADDR) | naturalNextPc
+    }
     io.error := (instrFromCache === 0) || (instrFromCache === (BigInt(1) << instrFromCache.getWidth)-1)
 
     IFID.add(PC)(pc)
@@ -71,7 +76,9 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     regf(0) := 0 // x0 is hardwired to zero
 
     IDEX.add(RS1)(regf.read(rs1(IFID.get(Instruction))))
+    IDEX.add(RS1Num)(rs1(IFID.get(Instruction)))
     IDEX.add(RS2)(regf.read(rs2(IFID.get(Instruction))))
+    IDEX.add(RS2Num)(rs2(IFID.get(Instruction)))
     IDEX.add(RDNum)(rd(IFID.get(Instruction)))
 
     IDEX.add(IMM_B)(immGenB(IFID.get(Instruction)))
@@ -211,9 +218,25 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
 
   val writeBack = new Area {
     // todo: Don't write to x0
-    decode.regf.write(
-      MEMWB.get(RDNum), MEMWB.get(MEM_TO_REG) ? MEMWB.get(MEM_RDATA) | MEMWB.get(ALU_RESULT).asBits
-    )
+    when(MEMWB.get(WRITE_REG)){
+      decode.regf.write(
+        MEMWB.get(RDNum), MEMWB.get(MEM_TO_REG) ? MEMWB.get(MEM_RDATA) | MEMWB.get(ALU_RESULT).asBits
+      )
+    }
+
+    // Data hazard detect unit
+    val DHDU = new Area {
+      when(
+        IDEX.get(WRITE_REG) && (IDEX.get(RDNum) === rs1(IFID.get(Instruction)) || IDEX.get(RDNum) === rs2(IFID.get(Instruction)))
+      ) {
+        fetch.loadStall := True
+      } otherwise(fetch.loadStall := False)
+      IFID.stallBy(fetch.loadStall)
+      IDEX.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
+      EXMEM.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
+      MEMWB.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
+    }
+
   }
 
   def initCodeRom(hexFilePath: String, offset: Int): Unit = {
