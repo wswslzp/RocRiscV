@@ -11,21 +11,24 @@ class StageReg[T <: Data](_dataType: => T) extends HardType[T](_dataType) with N
   setWeakName(this.getClass.getSimpleName.replace("$", ""))
 }
 
+// todo: flush, stall signals should be defined as set
 case class StageRegProperty[T <: Data](
                            var hardReg: T,
-                           var assignment: () => T = null,
-                           var flushSignal: Bool = null,
-                           var stallSignal: Bool = null,
-                           var startPrevStage: Stage = null
+                           var assignment: () => T = null
                            ){
+  var startPrevStage: Stage = _
+  val flushSignals = mutable.HashSet[Bool]()
+  val stallSignals = mutable.HashSet[Bool]()
   def isAssigned: Boolean = assignment != null
-  def isFlushable: Boolean = flushSignal != null
-  def isStallable: Boolean = stallSignal != null
+  def isFlushable: Boolean = flushSignals.nonEmpty
+  def isStallable: Boolean = stallSignals.nonEmpty
   def hasUnusedStage: Boolean = startPrevStage != null
 }
 
 class Stage extends Nameable {
   private val regProperty = mutable.HashMap[StageReg[Data], StageRegProperty[Data]]()
+  private val stageStallSignals = mutable.HashSet[Bool]()
+  private val stageFlushSignals = mutable.HashSet[Bool]()
   private var nextStage: Stage = _
   private var prevStage: Stage = _
 
@@ -68,27 +71,27 @@ class Stage extends Nameable {
     }).hardReg.asInstanceOf[T]
   }
 
-  def stallBy(reg: StageRegCommonType*)(sig: => Bool): Stage = {
+  def stallBy(reg: StageRegCommonType*)(sigs: Bool*): Stage = {
     reg.foreach{sReg=>
       require(regProperty.contains(sReg.asInstanceOf[StageReg[Data]]))
-      regProperty(sReg.asInstanceOf[StageReg[Data]]).stallSignal = sig
+      sigs.foreach(sig=> regProperty(sReg.asInstanceOf[StageReg[Data]]).stallSignals += sig)
     }
     this
   }
-  def stallBy(sig: =>Bool): Stage = {
-    regProperty.valuesIterator.foreach(_.stallSignal = sig)
+  def stallBy(sigs: Bool*): Stage = {
+    sigs.foreach(sig=> stageStallSignals += sig)
     this
   }
 
-  def flushBy(reg: StageRegCommonType*)(sig: => Bool): Stage = {
+  def flushBy(reg: StageRegCommonType*)(sigs: Bool*): Stage = {
     reg.foreach{sReg=>
       require(regProperty.contains(sReg.asInstanceOf[StageReg[Data]]))
-      regProperty(sReg.asInstanceOf[StageReg[Data]]).flushSignal = sig
+      sigs.foreach(sig=> regProperty(sReg.asInstanceOf[StageReg[Data]]).flushSignals += sig)
     }
     this
   }
-  def flushBy(sig: => Bool): Stage = {
-    regProperty.valuesIterator.foreach(_.flushSignal = sig)
+  def flushBy(sigs: Bool*): Stage = {
+    sigs.foreach(sig=> stageFlushSignals += sig)
     this
   }
 
@@ -105,30 +108,39 @@ class Stage extends Nameable {
   def build(): Unit = {
     // todo: here we solve the problem of missing assignments,
     //  but introducing a hidden danger of making replicated logic.
+    // note: run the every assignment `op` before actually assignment `op()` to the register.
+    //  consider that `get` api is invoked inside the `add` api invoking.
     regProperty.valuesIterator.filter(_.isAssigned).map(_.assignment).foreach(op => op())
+    stageStallSignals.foreach{sig=>
+      regProperty.valuesIterator.foreach(_.stallSignals += sig)
+    }
+    stageFlushSignals.foreach{sig=>
+      regProperty.valuesIterator.foreach(_.flushSignals += sig)
+    }
     regProperty.valuesIterator.filter(_.isAssigned).foreach { p =>
       val hReg = p.hardReg
       // NOTE: To prevent from scope violation occurs in the `when` context,
       //  this statement has to be added!
       hReg.parentScope = Component.current.dslBody
+      hReg.init(hReg.getZero) // todo: consider a better reset method.
       val op = p.assignment
       (p.isStallable, p.isFlushable) match {
         case (false, false) =>
           hReg := op()
         case (false, true) =>
-          when(p.flushSignal) {
+          when(p.flushSignals.toSeq.reduceBalancedTree(_ | _)) {
             hReg := hReg.getZero
           } otherwise (
             hReg := op()
           )
         case (true, false) =>
-          when(!p.stallSignal) {
+          when(!p.stallSignals.toSeq.reduceBalancedTree(_ & _)) {
             hReg := op()
           }
         case (true, true) =>
-          when(p.flushSignal) {
+          when(p.flushSignals.toSeq.reduceBalancedTree(_ | _)) {
             hReg := hReg.getZero
-          } elsewhen (!p.stallSignal) {
+          } elsewhen (!p.stallSignals.toSeq.reduceBalancedTree(_ & _)) {
             hReg := op()
           }
       }
@@ -146,9 +158,9 @@ trait PipelineImpl {
     nex.setPrevStage(cur)
   }
 
-  Component.current.addPrePopTask(() => {
+  Component.current afterElaboration {
     stage.foreach(_.build())
-  })
+  }
 }
 
 object PipelineTest {
@@ -193,7 +205,9 @@ object PipelineTest {
     stage(0).stallBy(io.stall_0)
     stage(1).stallBy(regA, regB)(io.stall_1)
     stage(3).flushBy(regA)(io.flush_3)
+    stage(3).stallBy(regA)(io.stall_1)
     stage.last.flushBy(io.flush_3 & io.stall_1)
+    stage(3).stallBy(io.stall_0)
 
     io.data_c := stage.last.get(regC)
     io.data_d := stage.last.get(regD)

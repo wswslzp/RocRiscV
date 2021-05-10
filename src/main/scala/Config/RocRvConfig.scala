@@ -9,7 +9,8 @@ case class RocRvConfig(
                       dataWidth: Int = 64,
                       addrWidth: Int = 64
                       ) {
-  def initPcAddr: Int = 0
+  val stageRegSpace = StageRegSpace(this)
+  def initPcAddr: Int = 0x10180
   def defaultInstCacheConfig: CacheConfig = CacheConfig(
     cacheReadWritePolicy = new CacheReadWritePolicy(ReadAllocate, WriteThrough, WriteAllocate),
     axi4Config = CacheConfig.defaultAxiCfg, cacheBlockSize = 32, addrWidth = addrWidth
@@ -41,8 +42,15 @@ object DecodingMethod {
   def immGenS(instr: Bits): Bits = funct7(instr) ## rd(instr)
   def immGenB(instr: Bits): Bits = funct7(instr).msb ## rd(instr).lsb ## funct7(instr)(5 downto 0) ## rd(instr)(4 downto 1)
   def immGenU(instr: Bits): Bits = funct7(instr) ## rs2(instr) ## rs1(instr) ## funct3(instr)
-  def immGenJ(instr: Bits): Bits = funct7(instr).msb ## rs1(instr) ## funct3(instr) ## rs2(instr).lsb ## funct7(instr)(5 downto 0) ## rs2(instr)(4 downto 1)
+  def immGenJ(instr: Bits): Bits = {
+    val tmp = funct7(instr) ## rs2(instr) ## rs1(instr) ## funct3(instr)
+    tmp(19) ## tmp(7 downto 0) ## tmp(8) ## tmp(18 downto 9)
+  }
 
+}
+
+object CPUError {
+  def illegalInstruction: Bits = B"00"
 }
 
 object RiscVISA {
@@ -113,10 +121,14 @@ object RiscVISA {
   def BGE (rvc : Boolean) = if(rvc) M"-----------------101-----1100011" else M"-----------------101---0-1100011"
   def BLTU(rvc : Boolean) = if(rvc) M"-----------------110-----1100011" else M"-----------------110---0-1100011"
   def BGEU(rvc : Boolean) = if(rvc) M"-----------------111-----1100011" else M"-----------------111---0-1100011"
+  def jumpType            = M"110-111"
+  def isJumpType(i: Bits): Bool = opcode(i) === M"110-111"
   def JALR               = M"-----------------000-----1100111"
   def JAL(rvc : Boolean) = if(rvc) M"-------------------------1101111" else M"----------0--------------1101111"
   def LUI                = M"-------------------------0110111"
   def AUIPC              = M"-------------------------0010111"
+  def auipcType          = M"0010111"
+  def isAuipcType(i: Bits) = opcode(i) === M"0010111"
 
   def MULX               = M"0000001----------0-------0110011"
   def DIVX               = M"0000001----------1-------0110011"

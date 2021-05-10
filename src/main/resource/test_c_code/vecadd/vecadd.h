@@ -1,0 +1,1 @@
+int vecadd(int*, int*, int*, int);

@@ -13,3 +13,9 @@ test:runMain HexToolTest
 test:runMain HexToolTest
 runMain SingleCycle.SingCycCPU
 compile
+test:compile
+test:runMain CpuTest.FiveStagesCpuTest
+compile
+test:compile
+test:runMain SelfContainTest
+test:runMain CpuTest.FiveStagesCpuTest

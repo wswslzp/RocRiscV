@@ -3,43 +3,21 @@ package PipelineCpu
 import spinal.core._
 import spinal.lib._
 import Config._
+import spinal.core.sim._
 
+// todo:
+//  1. introduce branch hazard unit; Now we consider adopting
+//      a static branch prediction method: Assume branch not taken.
+//  2. need unconditional jump support: lui, auipc, jal, jalr
 /**
  * An Five stages pipeline RISC-V CPU.
  * Support RV64I, except for `fence`, `ecall`, `ebreak` and csr logic
- * @param cfg
+ * @param cfg Configuration of the CPU
  */
 case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
   import DecodingMethod._
   import RiscVISA._
-  import ALU_CTRL_CMD._
-  // IFID
-  object Instruction extends StageReg(Bits(32 bit))
-  object PC extends StageReg(UInt(cfg.addrWidth bit))
-  // IDEX
-  object RS1 extends StageReg(Bits(cfg.dataWidth bit))
-  object RS1Num extends StageReg(UInt(5 bit))
-  object RS2 extends StageReg(Bits(cfg.dataWidth bit))
-  object RS2Num extends StageReg(UInt(5 bit))
-  object RDNum extends StageReg(UInt(5 bit))
-  object IMM_I extends StageReg(Bits(12 bit))
-  object IMM_S extends StageReg(Bits(12 bit))
-  object IMM_B extends StageReg(Bits(12 bit))
-  object IMM_U extends StageReg(Bits(20 bit))
-  object IMM_J extends StageReg(Bits(20 bit))
-  object ARITH_TYPE extends StageReg(Bits(4 bit))
-  object ALU_SRC_SEL extends StageReg(Bool())
-  object ALU_IMM_SRC extends StageReg(Bool())
-  object ALU_OP extends StageReg(Bits(2 bit))
-  object MEM_TO_REG extends StageReg(Bool())
-  object WRITE_REG extends StageReg(Bool())
-  object BRANCH extends StageReg(Bool())
-  // EXMEM
-  object ALU_RESULT extends StageReg(SInt(cfg.dataWidth bit))
-  object BRANCH_ASSERT extends StageReg(Bool())
-  object BRANCH_ADDR extends StageReg(UInt(cfg.addrWidth bit))
-  // MEMWB
-  object MEM_RDATA extends StageReg(Bits(cfg.dataWidth bit))
+  import cfg.stageRegSpace._
 
   val io = new Bundle {
     val test = new Bundle {
@@ -50,17 +28,34 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
   }
 
   val instructionCache = Mem(Bits(32 bit), BigInt(1) << 20)
-  val dataCache = Mem(Bits(cfg.dataWidth bit), BigInt(1) << 20)
+  val dataCache = Mem(Bits(cfg.dataWidth bit), BigInt(1) << 20)  simPublic()
+  dataCache.initBigInt(Seq.fill(1 << 20)(BigInt(0)))
 
   val fetch = new Area {
     val pc = Reg(UInt(cfg.addrWidth bit)) init(cfg.initPcAddr)
     val instrFromCache = instructionCache.readAsync((pc >> 2).resized, writeFirst)
     val naturalNextPc = pc + 4
-    val nextPcIsBranch = EXMEM.get(BRANCH) && EXMEM.get(BRANCH_ASSERT) // Only for `BEQ`
+    val nextPcIsBranch = EXMEM.get(BRANCH) && EXMEM.get(BRANCH_ASSERT)
     val loadStall = Bool()
+    val jumpReturnPc = UInt(cfg.addrWidth bit)
     when(!loadStall){
-      pc := nextPcIsBranch ? EXMEM.get(BRANCH_ADDR) | naturalNextPc
+      when(EXMEM.get(IS_JUMP)){
+        when(EXMEM.get(IS_JALR)){
+//          pc := ( EXMEM.get(IMM_I).asSInt.resize(cfg.addrWidth) + EXMEM.get(RS1).asSInt ).asUInt
+          pc := jumpReturnPc
+        } otherwise( // jal
+          pc := ( ( EXMEM.get(IMM_J) |<< 1 ).asSInt.resize(cfg.addrWidth) + EXMEM.get(PC).asSInt ).asUInt
+        )
+      } elsewhen(nextPcIsBranch){
+        pc := EXMEM.get(BRANCH_ADDR)
+      } otherwise(
+        pc := naturalNextPc
+      )
     }
+    // todo: waiting for `fiber` framework in the future spinal version
+    IFID.flushBy(nextPcIsBranch, EXMEM.get(IS_JUMP))
+    IDEX.flushBy(nextPcIsBranch, EXMEM.get(IS_JUMP))
+    EXMEM.flushBy(nextPcIsBranch, EXMEM.get(IS_JUMP))
     io.error := (instrFromCache === 0) || (instrFromCache === (BigInt(1) << instrFromCache.getWidth)-1)
 
     IFID.add(PC)(pc)
@@ -89,17 +84,22 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     }
     IDEX.add(ALU_IMM_SRC){isImmType(IFID.get(Instruction))}
 
-    IDEX.add(ALU_SRC_SEL)(isMemType(IFID.get(Instruction)))
-    IDEX.add(MEM_TO_REG)(isStoreType(IFID.get(Instruction)))
-    IDEX.add(WRITE_REG)(isLoadType(IFID.get(Instruction)))
+    IDEX.add(MEM_INSTR)(isMemType(IFID.get(Instruction))) // When sel=1, alu src is from
+    IDEX.add(MEM_TO_REG)(isLoadType(IFID.get(Instruction)))
+    IDEX.add(WRITE_REG)(isLoadType(IFID.get(Instruction)) || isRegAndImmType(IFID.get(Instruction)) || IFID.get(Instruction) === AUIPC)
     IDEX.add(BRANCH)(isBraType(IFID.get(Instruction)))
     IDEX.add(ALU_OP){
       opcode(IFID.get(Instruction)).mux(
+        auipcType -> B"2'b11",
         regAndImmType -> B"2'b10",
         branchType -> B"2'b01",
         default -> B"2'b00"
       )
     }
+    IDEX.add(IS_LUI)(IFID.get(Instruction) === LUI)
+    IDEX.add(IS_JUMP)(isJumpType(IFID.get(Instruction)))
+    IDEX.add(IS_JALR)(IFID.get(Instruction) === JALR)
+    IDEX.add(IS_AUIPC)(IFID.get(Instruction) === AUIPC)
     io.test.regValue := regf(io.test.regAddr)
   }
 
@@ -107,14 +107,20 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val alu = ArithLogicUnit(cfg)
     val rs1_value = SInt(cfg.dataWidth bit)
     val rs2_value = SInt(cfg.dataWidth bit)
-    alu.io.dataA := rs1_value
-    alu.io.dataB := IDEX.get(ALU_SRC_SEL) ? (IDEX.get(MEM_TO_REG) ? IDEX.get(IMM_S).asSInt | IDEX.get(IMM_I).asSInt) | IDEX.get(RS2).asSInt
-    when(IDEX.get(ALU_SRC_SEL)){
-      when(IDEX.get(MEM_TO_REG)){
+    when(IDEX.get(IS_AUIPC)){
+      alu.io.dataA := IDEX.get(PC).resized.asSInt
+    } otherwise {
+      alu.io.dataA := rs1_value
+    }
+    when(IDEX.get(MEM_INSTR)){
+      when(~IDEX.get(MEM_TO_REG)){
         alu.io.dataB := IDEX.get(IMM_S).asSInt.resized
       } otherwise(
         alu.io.dataB := IDEX.get(IMM_I).asSInt.resized
       )
+    } elsewhen (IDEX.get(IS_AUIPC)){
+//      alu.io.dataB := IDEX.get(IMM_U).resizeLeft(cfg.addrWidth).asSInt
+      alu.io.dataB := IDEX.get(IMM_U).resizeLeft(32).asSInt.resize(cfg.dataWidth)
     } otherwise(
       when(IDEX.get(ALU_IMM_SRC)){
         alu.io.dataB := IDEX.get(IMM_I).asSInt.resized
@@ -122,37 +128,13 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
         alu.io.dataB := rs2_value
       )
     )
-    val aluCtrlUnit = new Area {
-      switch(IDEX.get(ALU_OP)) {
-        is(B"00"){alu.io.ctrl := ALU_ADD} // default
-        is(B"01"){alu.io.ctrl := ALU_SUB} // branch, substrate two number to test if it's zero
-        is(B"10"){ // reg
-          switch(IDEX.get(ARITH_TYPE)(2 downto 0)){
-            is(B"000"){
-              when(IDEX.get(ARITH_TYPE).msb){
-                alu.io.ctrl := ALU_SUB
-              }.otherwise(
-                alu.io.ctrl := ALU_ADD
-              )
-            }
-            is(B"001"){alu.io.ctrl := ALU_SLL}
-            is(B"010"){alu.io.ctrl := ALU_SLT}
-            is(B"011"){alu.io.ctrl := ALU_SLTU}
-            is(B"100"){alu.io.ctrl := ALU_BIT_XOR}
-            is(B"101"){
-              when(IDEX.get(ARITH_TYPE).msb){
-                alu.io.ctrl := ALU_SRA
-              } otherwise(
-                alu.io.ctrl := ALU_SRL
-              )
-            }
-            is(B"110"){alu.io.ctrl := ALU_BIT_OR}
-            is(B"111"){alu.io.ctrl := ALU_BIT_AND}
-          }
-        }
-        default {alu.io.ctrl := 0}
-      }
-    }
+    val aluCtrlUnit = AluCtrlUnit(cfg)
+    aluCtrlUnit.io.arith_type := IDEX.get(ARITH_TYPE)
+    aluCtrlUnit.io.alu_op := IDEX.get(ALU_OP)
+    aluCtrlUnit.io.is_imm := IDEX.get(ALU_IMM_SRC)
+    alu.io.ctrl := aluCtrlUnit.io.ctrl
+
+    EXMEM.add(PASS_RS1_VAL)(rs1_value)
     EXMEM.add(ALU_RESULT){alu.io.dataOut}
 
     val branchType = IDEX.get(ARITH_TYPE)(2 downto 0)
@@ -167,51 +149,51 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
       default   {bAssert := False}
     }
     EXMEM.add(BRANCH_ASSERT){bAssert}
-    EXMEM.add(BRANCH_ADDR) {
+    EXMEM.add(BRANCH_ADDR) { // todo: branch address calculation move to ID stage
       ( IDEX.get(PC).asSInt + ( IDEX.get(IMM_B) << 1).asSInt ).asUInt
     }
+    EXMEM.get(BRANCH_ADDR).init(0)
 
     // forwarding logic
-    val forward = new Area {
+    val forward = new Area { // TODO: forward logic is wrong. ALU result bypass one cycle later than it should be.
       val fa = Bits(2 bit)
       val fb = Bits(2 bit)
       val prevWriteReg = EXMEM.get(WRITE_REG) && EXMEM.get(RDNum) =/= 0
       val prevNotWriteRs1 = !(prevWriteReg && EXMEM.get(RDNum) === IDEX.get(RS1Num))
       val prevNotWriteRs2 = !(prevWriteReg && EXMEM.get(RDNum) === IDEX.get(RS2Num))
+      fa := 0; fb := 0 // default situation
       when(prevWriteReg){
         switch(EXMEM.get(RDNum)){
           is(IDEX.get(RS1Num)){
-            fa := B"10"; fb := 0
+            fa := B"10"
           }
           is(IDEX.get(RS2Num)){
-            fa := 0; fb := B"10"
-          }
-          default{
-            fa := 0; fb := 0
+            fb := B"10"
           }
         }
-      } elsewhen(MEMWB.get(WRITE_REG) && MEMWB.get(RDNum) =/= 0){
-        when(prevNotWriteRs1 && MEMWB.get(RDNum) === IDEX.get(RS1Num)){
-          fa := B"01"; fb := 0
-        } elsewhen(prevNotWriteRs2 && MEMWB.get(RDNum) === IDEX.get(RS2Num)){
-          fa := 0; fb := B"01"
-        } otherwise{
-          fa := 0; fb := 0
-        }
-      } otherwise {
-        fa := 0; fb := 0 // default situation
       }
+      when(MEMWB.get(WRITE_REG) && MEMWB.get(RDNum) =/= 0){
+        when(prevNotWriteRs1 && MEMWB.get(RDNum) === IDEX.get(RS1Num)){
+          fa := B"01"
+        } elsewhen(prevNotWriteRs2 && MEMWB.get(RDNum) === IDEX.get(RS2Num)){
+          fb := B"01"
+        }
+      }
+
+      // jalr forward logic
+      fetch.jumpReturnPc := (EXMEM.get(IMM_I).asSInt.resize(cfg.addrWidth)+EXMEM.get(PASS_RS1_VAL)).asUInt
     }
   }
 
   val memAccess = new Area { mem_area =>
     val address = EXMEM.get(ALU_RESULT).asUInt |>> log2Up(cfg.dataWidth/8)
+    address.simPublic()
     val byteOffset = EXMEM.get(ALU_RESULT)(cfg.bOffsetRange).asUInt
     val halfWordOffset = EXMEM.get(ALU_RESULT)(cfg.hOffsetRange).asUInt
     val wordOffset = if(cfg.dataWidth > 32){
       EXMEM.get(ALU_RESULT)(cfg.wOffsetRange).asUInt
     } else {U(0)}
-    val en = EXMEM.get(ALU_SRC_SEL)
+    val en = EXMEM.get(MEM_INSTR)
 
     val rdata = Bits(cfg.dataWidth bit)
     when(en){
@@ -227,7 +209,7 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
       is(B"010"){rdata1 := rdata32_v(wordOffset).asSInt.resize(cfg.dataWidth bit).asBits} // LW
       is(B"100"){rdata1 := rdata8_v(byteOffset).resize(cfg.dataWidth).asBits} // lbu
       is(B"101"){rdata1 := rdata16_v(halfWordOffset).resize(cfg.dataWidth).asBits} // lhu
-      is(B"110"){rdata1 := rdata32_v(wordOffset).resize(cfg.dataWidth).asBits} // todo check if lwu is this
+      is(B"110"){rdata1 := rdata32_v(wordOffset).resize(cfg.dataWidth).asBits}
       default   {rdata1 := rdata}
     }
     MEMWB.add(MEM_RDATA){rdata1}
@@ -236,7 +218,7 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val wsel = Bits(2 bit) // bypass logic
     val dataWrite = wsel.mux(
       B"00" -> EXMEM.get(RS2),
-      B"01" -> EXMEM.get(ALU_RESULT).asBits,
+      B"01" -> MEMWB.get(ALU_RESULT).asBits,
       B"10" -> MEMWB.get(MEM_RDATA),
       default -> B(0, cfg.dataWidth bit)
     )
@@ -257,7 +239,7 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val forward = new Area {
       val isBypassRs2 = MEMWB.get(WRITE_REG) && ( MEMWB.get(RDNum) =/= 0 ) && ( MEMWB.get(RDNum) === EXMEM.get(RS2Num) )
       when(isBypassRs2){
-        when(EXMEM.get(ALU_SRC_SEL)){// load type
+        when(MEMWB.get(MEM_TO_REG)){// load type
           wsel := B"10"
         } otherwise(
           wsel := B"01" // or Reg type
@@ -269,9 +251,19 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
   }
 
   val writeBack = new Area {
-    // todo: Don't write to x0
-    val regfWriteData = MEMWB.get(MEM_TO_REG) ? MEMWB.get(MEM_RDATA) | MEMWB.get(ALU_RESULT).asBits
-    when(MEMWB.get(WRITE_REG)){
+    val regfWriteData = Bits(cfg.dataWidth bit)
+    when(MEMWB.get(MEM_TO_REG)){
+      regfWriteData := MEMWB.get(MEM_RDATA)
+    }elsewhen(MEMWB.get(IS_LUI)){
+//      regfWriteData := MEMWB.get(IMM_U) ## decode.regf(MEMWB.get(RDNum))(cfg.dataWidth-21 downto 0)
+      regfWriteData := ( MEMWB.get(IMM_U) ## decode.regf(MEMWB.get(RDNum))(11 downto 0) ).asSInt.resize(cfg.dataWidth).asBits
+    }elsewhen(MEMWB.get(IS_JUMP)){
+      regfWriteData := (MEMWB.get(PC) + 4).resized.asBits
+    }otherwise(
+      regfWriteData := MEMWB.get(ALU_RESULT).asBits
+    )
+    val regfWriteEn = MEMWB.get(WRITE_REG) || MEMWB.get(IS_LUI) || MEMWB.get(IS_JUMP) || MEMWB.get(IS_AUIPC)
+    when(regfWriteEn && MEMWB.get(RDNum) =/= 0){
       decode.regf.write(
         MEMWB.get(RDNum), regfWriteData
       )
@@ -280,27 +272,27 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     // Data hazard detect unit
     val DHDU = new Area {
       when(
-        IDEX.get(WRITE_REG) && (IDEX.get(RDNum) === rs1(IFID.get(Instruction)) || IDEX.get(RDNum) === rs2(IFID.get(Instruction)))
+        IDEX.get(MEM_TO_REG) && (IDEX.get(RDNum) === rs1(IFID.get(Instruction)) || IDEX.get(RDNum) === rs2(IFID.get(Instruction)))
       ) {
         fetch.loadStall := True
       } otherwise(fetch.loadStall := False)
       IFID.stallBy(fetch.loadStall)
       IDEX.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
-      EXMEM.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
-      MEMWB.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
+//      EXMEM.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
+//      MEMWB.flushBy(MEM_TO_REG, WRITE_REG)(fetch.loadStall)
     }
 
     // bypass logic
     execute.rs1_value := execute.forward.fa.mux(
       B"00" -> IDEX.get(RS1).asSInt,
-      B"01" -> EXMEM.get(ALU_RESULT),
-      B"10" -> regfWriteData.asSInt,
+      B"01" -> regfWriteData.asSInt,
+      B"10" -> EXMEM.get(ALU_RESULT),
       default-> S(0)
     )
     execute.rs2_value := execute.forward.fb.mux(
       B"00" -> IDEX.get(RS2).asSInt,
-      B"01" -> EXMEM.get(ALU_RESULT),
-      B"10" -> regfWriteData.asSInt,
+      B"01" -> regfWriteData.asSInt,
+      B"10" -> EXMEM.get(ALU_RESULT),
       default-> S(0)
     )
 
@@ -319,6 +311,10 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
 object FiveStagesCpu {
   def main(args: Array[String]): Unit = {
     SpinalConfig(targetDirectory = "rtl")
-      .generateVerilog(FiveStagesCpu(RocRvConfig()))
+      .generateVerilog{
+        val cpu = FiveStagesCpu(RocRvConfig())
+//        cpu.initCodeRom("src/main/resource/test_asm_code/print/print.hex", 0)
+        cpu
+      }
   }
 }
