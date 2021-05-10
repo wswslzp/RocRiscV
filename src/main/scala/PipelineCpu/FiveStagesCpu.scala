@@ -8,7 +8,6 @@ import spinal.core.sim._
 // todo:
 //  1. introduce branch hazard unit; Now we consider adopting
 //      a static branch prediction method: Assume branch not taken.
-//  2. need unconditional jump support: lui, auipc, jal, jalr
 /**
  * An Five stages pipeline RISC-V CPU.
  * Support RV64I, except for `fence`, `ecall`, `ebreak` and csr logic
@@ -29,7 +28,6 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
 
   val instructionCache = Mem(Bits(32 bit), BigInt(1) << 20)
   val dataCache = Mem(Bits(cfg.dataWidth bit), BigInt(1) << 20)  simPublic()
-  dataCache.initBigInt(Seq.fill(1 << 20)(BigInt(0)))
 
   val fetch = new Area {
     val pc = Reg(UInt(cfg.addrWidth bit)) init(cfg.initPcAddr)

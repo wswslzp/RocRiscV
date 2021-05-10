@@ -10,7 +10,7 @@ object FiveStagesCpuTest extends App{
   val simConfig = SimConfig.withWave.allOptimisation.workspacePath("tb").compile{
     val cpu = FiveStagesCpu(RocRvConfig())
     cpu.initCodeRom("src/main/resource/test_asm_code/memacc/main.hex", 0)
-//    cpu.initDataRam(Seq.fill())
+    cpu.initDataRam(Seq.fill(1 << 20)(0))
     cpu
   }
   simConfig.doSimUntilVoid(0){dut=>
