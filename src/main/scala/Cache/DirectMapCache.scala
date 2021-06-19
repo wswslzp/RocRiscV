@@ -10,7 +10,7 @@ case class DirectMapCache(cfg: CacheConfig) extends Cache(cfg) {
   // Here we choose ReadAllocate, WriteThrough and WriteAllocate
 
   val blockAddr = getBlockAddr(io.cacheIntf.addr)
-  val inputFlag = getBlockFlag(io.cacheIntf.addr)
+  val inputFlag = getBlockTag(io.cacheIntf.addr)
   val blockOffset = getBlockOffset(io.cacheIntf.addr)
   val inputEnRise = io.cacheIntf.en.rise(False)
   val wordOffset = RegNextWhen(
@@ -25,14 +25,14 @@ case class DirectMapCache(cfg: CacheConfig) extends Cache(cfg) {
   val blockData = block.data
   val blockWord = getBlockWord(blockData, blockOffset)
 
-  val hit = block.valid && (inputFlag === block.flag) && io.cacheIntf.en
+  val hit = block.valid && (inputFlag === block.tag) && io.cacheIntf.en
   val hitRise = hit.rise(False)
 
   val missBlockAddr = RegNextWhen(blockAddr, !hit)
   val missBlockFlag = RegNextWhen(inputFlag, !hit)
   val missBlock = CacheBlock(cfg)
   missBlock.valid := True
-  missBlock.flag := missBlockFlag
+  missBlock.tag := missBlockFlag
   val missBlockWords = Vec.fill(cfg.cacheBlockSize)(Reg(Bits(cfg.dataWidth bit)))
   missBlock.data := missBlockWords.asBits
 

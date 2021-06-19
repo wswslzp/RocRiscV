@@ -66,7 +66,7 @@ case class CacheWrIntf(cfg: CacheConfig) extends Bundle with IMasterSlave {
 case class CacheBlock(cfg: CacheConfig) extends Bundle {
   val valid = Bool()
   val dirty = (cfg.cacheReadWritePolicy.writeHitPolicy == WriteBack) generate Bool()
-  val flag = Bits(
+  val tag = Bits(
     cfg.getFlagWidth bit
   )
   val data = Bits(
@@ -78,7 +78,7 @@ object CacheBlock {
   def apply(cfg: CacheConfig, valid: Bool, flag: Bits, data: Bits, dirty: Bool = null): CacheBlock = {
     val ret = CacheBlock(cfg)
     ret.valid := valid
-    ret.flag := flag
+    ret.tag := flag
     ret.data := data
     if(dirty != null) {
       ret.valid := dirty

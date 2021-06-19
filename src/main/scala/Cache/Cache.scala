@@ -38,11 +38,11 @@ class Cache(cfg: CacheConfig) extends Component {
   }
 
   /**
-   * Get the flag field of block data
+   * Get the tag field of block data
    * @param inputAddr input address from CPU
    * @return flag field
    */
-  protected def getBlockFlag(inputAddr: UInt): Bits = {
+  protected def getBlockTag(inputAddr: UInt): Bits = {
     inputAddr(cfg.addrWidth-1 downto ( cfg.addrWidth-cfg.getFlagWidth )).asBits
   }
 

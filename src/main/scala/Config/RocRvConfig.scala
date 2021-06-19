@@ -7,10 +7,12 @@ import PipelineCpu._
 
 case class RocRvConfig(
                       dataWidth: Int = 64,
-                      addrWidth: Int = 64
+                      addrWidth: Int = 64,
+                      interruptSrcNum: Int = 16
                       ) {
   val stageRegSpace = StageRegSpace(this)
   def initPcAddr: Int = 0x10180
+  def interruptHandleAddr: Int = 0x1c090000
   def defaultInstCacheConfig: CacheConfig = CacheConfig(
     cacheReadWritePolicy = new CacheReadWritePolicy(ReadAllocate, WriteThrough, WriteAllocate),
     axi4Config = CacheConfig.defaultAxiCfg, cacheBlockSize = 32, addrWidth = addrWidth

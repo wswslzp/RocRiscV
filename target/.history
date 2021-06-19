@@ -19,3 +19,12 @@ compile
 test:compile
 test:runMain SelfContainTest
 test:runMain CpuTest.FiveStagesCpuTest
+test:compile
+runMain Sim.RocRVSim.RocRVTest
+runMain Sim.RocRVSim.RocRVDutMain
+runMain Sim.RocRVSim.RocRVTest
+[
+runMain Sim.RocRVSim.RocRVTest
+[
+runMain Sim.RocRVSim.RocRVTest
+test:runMain CpuTest.FiveStagesCpuTest

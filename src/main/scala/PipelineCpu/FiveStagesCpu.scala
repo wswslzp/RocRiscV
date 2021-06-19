@@ -8,12 +8,14 @@ import spinal.core.sim._
 // todo:
 //  1. introduce branch hazard unit; Now we consider adopting
 //      a static branch prediction method: Assume branch not taken.
+//  2. including CSR instructions.
+//  3. including exception & interrupts (need CSR)
 /**
  * An Five stages pipeline RISC-V CPU.
  * Support RV64I, except for `fence`, `ecall`, `ebreak` and csr logic
  * @param cfg Configuration of the CPU
  */
-case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
+class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
   import DecodingMethod._
   import RiscVISA._
   import cfg.stageRegSpace._
@@ -23,6 +25,8 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
       val regAddr = in UInt(5 bit)
       val regValue = out Bits(cfg.dataWidth bit)
     }
+    val extInterrupt = in Bits(cfg.interruptSrcNum bit)
+
     val error = out Bool() // todo: including decoding errors
   }
 
@@ -64,6 +68,8 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val regf = Vec(Reg(Bits(cfg.dataWidth bit)), 32)
     regf.foreach(r=> r.init(0))
     regf(0) := 0 // x0 is hardwired to zero
+
+//    val csr_regs =
 
     IDEX.add(RS1)(regf.read(rs1(IFID.get(Instruction))))
     IDEX.add(RS1Num)(rs1(IFID.get(Instruction)))
@@ -240,7 +246,7 @@ case class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
         when(MEMWB.get(MEM_TO_REG)){// load type
           wsel := B"10"
         } otherwise(
-          wsel := B"01" // or Reg type
+          wsel := B"01" // or reg type
         )
       } otherwise(
         wsel := B"00" // no bypass
@@ -310,7 +316,7 @@ object FiveStagesCpu {
   def main(args: Array[String]): Unit = {
     SpinalConfig(targetDirectory = "rtl")
       .generateVerilog{
-        val cpu = FiveStagesCpu(RocRvConfig())
+        val cpu = new FiveStagesCpu(RocRvConfig())
 //        cpu.initCodeRom("src/main/resource/test_asm_code/print/print.hex", 0)
         cpu
       }
