@@ -9,17 +9,23 @@ import spinal.core.sim._
 trait RocRVDut {
   def getPC: BigInt
   def getRVCfg: RocRvConfig
-  def initL1DCache(content: Seq[Int]): Unit
+  def initL1DCache(content: Seq[BigInt]): Unit
+  def initL1DCache(hexFile: String, offset: Int): Unit
   def initL1ICache(hexFile: String, offset: Int): Unit
   def getL1CacheSize: Int
 
   def initDCacheWithZeros(): Unit = {
     initL1DCache(Seq.fill(1 << getL1CacheSize)(0))
   }
+  def initDCacheICahce(hexFile: String, offset: Int): Unit = {
+    initL1ICache(hexFile, offset)
+    initL1DCache(hexFile, offset)
+  }
 }
 
 class FiveStageCpuDut(cfg: RocRvConfig) extends FiveStagesCpu(cfg) with RocRVDut {
   fetch.pc.simPublic()
+  io.elements.foreach(_._2.simPublic())
 
   override def getPC: BigInt = {
     fetch.pc.toBigInt
@@ -29,9 +35,10 @@ class FiveStageCpuDut(cfg: RocRvConfig) extends FiveStagesCpu(cfg) with RocRVDut
 
   override def getRVCfg = cfg
 
-  override def initL1DCache(content: Seq[Int]): Unit = initDataRam(content)
+  override def initL1DCache(content: Seq[BigInt]): Unit = initDataRam(content)
 
   override def initL1ICache(hexFile: String, offset: Int): Unit = initCodeRom(hexFile, offset)
+  override def initL1DCache(hexFile: String, offset: Int): Unit = initDataRam(hexFile, offset)
 }
 
 /**

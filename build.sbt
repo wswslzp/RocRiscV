@@ -1,7 +1,7 @@
 name := "rvroc"
 version := "1.0"
 scalaVersion := "2.12.10"
-val spinalVersion = "1.4.3"
+val spinalVersion = "1.6.0"
 
 libraryDependencies ++= Seq(
   "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion,

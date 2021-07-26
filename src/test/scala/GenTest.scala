@@ -1,7 +1,7 @@
 import spinal.core._
 import spinal.core.sim._
 import spinal.lib._
-import generator._
+import fiber._
 
 // todo: fiber framework is not support yet.
 object GenTest extends App{

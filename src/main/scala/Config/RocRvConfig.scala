@@ -40,6 +40,7 @@ object DecodingMethod {
 
   // TODO: This method cannot reuse the previous decoding logic ?
   //  It's OK, i think.
+  // |funct7[31:25]|rs2[24:20]|rs1[19:15]|funct3[14:12]|rd[11:7]|opcode[6:0]|
   def immGenI(instr: Bits): Bits = funct7(instr) ## rs2(instr)
   def immGenS(instr: Bits): Bits = funct7(instr) ## rd(instr)
   def immGenB(instr: Bits): Bits = funct7(instr).msb ## rd(instr).lsb ## funct7(instr)(5 downto 0) ## rd(instr)(4 downto 1)
@@ -58,8 +59,8 @@ object CPUError {
 object RiscVISA {
   import DecodingMethod._
 
-  def regType            = B"0110011"
-  def isRegType(i: Bits): Bool = opcode(i) === B"0110011"
+  def regType            = M"011-011" // both for 32/64, opcode(3)=1 -> 32, opcode(3)=0 -> 64
+  def isRegType(i: Bits): Bool = opcode(i) === regType
   def ADD                = M"0000000----------000-----0110011"
   def SUB                = M"0100000----------000-----0110011"
   def SLL                = M"0000000----------001-----0110011"
@@ -71,8 +72,8 @@ object RiscVISA {
   def OR                 = M"0000000----------110-----0110011"
   def AND                = M"0000000----------111-----0110011"
 
-  def immType            = B"0010011"
-  def isImmType(i: Bits): Bool = opcode(i) === B"0010011"
+  def immType            = M"001-011"
+  def isImmType(i: Bits): Bool = opcode(i) === immType
   def ADDI               = M"-----------------000-----0010011"
   def SLLI               = M"000000-----------001-----0010011"
   def SLTI               = M"-----------------010-----0010011"
@@ -83,15 +84,15 @@ object RiscVISA {
   def ORI                = M"-----------------110-----0010011"
   def ANDI               = M"-----------------111-----0010011"
 
-  def regAndImmType      = M"0-10011"
-  def isRegAndImmType(i: Bits): Bool = opcode(i) === M"0-10011"
+  def regAndImmType      = M"0-1-011"
+  def isRegAndImmType(i: Bits): Bool = opcode(i) === regAndImmType
 
   def MemType            = M"0-00011"
-  def isMemType(i: Bits): Bool = opcode(i) === M"0-00011"
+  def isMemType(i: Bits): Bool = opcode(i) === MemType
   def LoadType           = B"0000011"
-  def isLoadType(i: Bits): Bool = opcode(i) === B"0000011"
+  def isLoadType(i: Bits): Bool = opcode(i) === LoadType
   def StoreType          = B"0100011"
-  def isStoreType(i: Bits): Bool = opcode(i) === B"0100011"
+  def isStoreType(i: Bits): Bool = opcode(i) === StoreType
   def LB                 = M"-----------------000-----0000011"
   def LH                 = M"-----------------001-----0000011"
   def LW                 = M"-----------------010-----0000011"
@@ -116,7 +117,7 @@ object RiscVISA {
   def AMOMAXU            = M"11100------------010-----0101111"
 
   def branchType          = B"1100011"
-  def isBraType(i: Bits): Bool = opcode(i) === B"1100011"
+  def isBraType(i: Bits): Bool = opcode(i) === branchType
   def BEQ (rvc : Boolean) = if(rvc) M"-----------------000-----1100011" else M"-----------------000---0-1100011"
   def BNE (rvc : Boolean) = if(rvc) M"-----------------001-----1100011" else M"-----------------001---0-1100011"
   def BLT (rvc : Boolean) = if(rvc) M"-----------------100-----1100011" else M"-----------------100---0-1100011"
@@ -124,13 +125,13 @@ object RiscVISA {
   def BLTU(rvc : Boolean) = if(rvc) M"-----------------110-----1100011" else M"-----------------110---0-1100011"
   def BGEU(rvc : Boolean) = if(rvc) M"-----------------111-----1100011" else M"-----------------111---0-1100011"
   def jumpType            = M"110-111"
-  def isJumpType(i: Bits): Bool = opcode(i) === M"110-111"
+  def isJumpType(i: Bits): Bool = opcode(i) === jumpType
   def JALR               = M"-----------------000-----1100111"
   def JAL(rvc : Boolean) = if(rvc) M"-------------------------1101111" else M"----------0--------------1101111"
   def LUI                = M"-------------------------0110111"
   def AUIPC              = M"-------------------------0010111"
   def auipcType          = M"0010111"
-  def isAuipcType(i: Bits) = opcode(i) === M"0010111"
+  def isAuipcType(i: Bits) = opcode(i) === auipcType
 
   def MULX               = M"0000001----------0-------0110011"
   def DIVX               = M"0000001----------1-------0110011"

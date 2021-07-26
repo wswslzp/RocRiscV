@@ -19,11 +19,15 @@ case class StageRegSpace(cfg: RocRvConfig) {
   object IMM_B extends StageReg(Bits(12 bit))
   object IMM_U extends StageReg(Bits(20 bit))
   object IMM_J extends StageReg(Bits(20 bit))
+
   object ARITH_TYPE extends StageReg(Bits(4 bit))
-  object MEM_INSTR extends StageReg(Bool())
+  object IS_MEM_INSTR extends StageReg(Bool())
   object ALU_IMM_SRC extends StageReg(Bool())
   object ALU_OP extends StageReg(Bits(2 bit))
+  object ALU_32B extends StageReg(Bool())
+
   object MEM_TO_REG extends StageReg(Bool())
+  object WRITE_MEM extends StageReg(Bool())
   object WRITE_REG extends StageReg(Bool())
   object BRANCH extends StageReg(Bool())
   object IS_LUI extends StageReg(Bool())
@@ -35,6 +39,7 @@ case class StageRegSpace(cfg: RocRvConfig) {
   object ALU_RESULT extends StageReg(SInt(cfg.dataWidth bit))
   object BRANCH_ASSERT extends StageReg(Bool())
   object BRANCH_ADDR extends StageReg(UInt(cfg.addrWidth bit))
+  object LUI_RESULT extends StageReg(SInt(cfg.dataWidth bit))
   // MEMWB
   object MEM_RDATA extends StageReg(Bits(cfg.dataWidth bit))
 
