@@ -51,15 +51,18 @@ case class ArithLogicUnit(cfg: RocRvConfig) extends Component {
     is(ALU_SLL)     {dataOut := dataA << dataB.asUInt}
     is(ALU_SRL)     {dataOut := (dataA.asUInt >> dataB.asUInt).asSInt}
     is(ALU_SRA)     {dataOut := dataA >> dataB.asUInt}
-    is(ALU_ADD)     {dataOut := dataA +| dataB} // ADD
-    is(ALU_SUB)     {dataOut := dataA -| dataB} // SUB
+    is(ALU_ADD)     {dataOut := dataA + dataB} // ADD //todo, 1 + 0x7fff_ffff = 0x7fff_ffff ?? for addw
+    is(ALU_SUB)     {dataOut := dataA - dataB} // SUB
     is(ALU_SLT)     {dataOut := io.lessThan ? S(1, cfg.dataWidth bit) | S(0, cfg.dataWidth bit)} // SLT
     is(ALU_SLTU)    {dataOut := io.uLessThan ? S(1, cfg.dataWidth bit) | S(0, cfg.dataWidth bit)}
     default         {dataOut := 0}
   }
-  val dataOutSat32 = dataOut.sat(32)
+//  val dataOutSat32 = dataOut.sat(32)
+//  io.dataOut := io.is32b ? (
+//    S(dataOutSat32.msb, 32 bit) @@ dataOutSat32(31 downto 0)
+//    ) | dataOut
   io.dataOut := io.is32b ? (
-    S(dataOutSat32.msb, 32 bit) @@ dataOutSat32(31 downto 0)
+    S(dataOut(31), 32 bit) @@ dataOut(31 downto 0)
   ) | dataOut
   io.zero := dataOut === 0
 }

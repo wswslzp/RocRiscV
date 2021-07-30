@@ -255,7 +255,8 @@ class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
     val wsel = Bits(2 bit) // bypass logic
     val wmask = Bits(cfg.dataWidth bit)
     val dataWrite = wsel.mux(
-      B"00" -> EXMEM.get(RS2),
+//      B"00" -> EXMEM.get(RS2),
+      B"00" -> decode.regf(EXMEM.get(RS2Num)), // TODO: check it
       B"01" -> MEMWB.get(ALU_RESULT).asBits,
       B"10" -> MEMWB.get(MEM_RDATA),
       default -> B(0, cfg.dataWidth bit)
@@ -283,10 +284,14 @@ class FiveStagesCpu(cfg: RocRvConfig) extends FiveStage {
         wdata := wdata32_v.asBits
         wmask := ( B"32'hffffffff" << (wordOffset << 5) ).resize(cfg.dataWidth)
       } // sw
-      default   {
+      is(B"011")   {
         wdata := dataWrite
         wmask := B"64'hffffffffffffffff"
       } // sd
+      default {
+        wdata := dataWrite
+        wmask := B"64'h0"
+      }
     }
     dataCache.write(address.resized, wdata, wr & en, wmask)
 

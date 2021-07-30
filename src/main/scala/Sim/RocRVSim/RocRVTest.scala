@@ -39,7 +39,28 @@ class RocRVTest[T <: RocRVDut](top: => RocRvTestTop[T]) {
       testTop
     }).doSim("RocRVTest"){dut=>
       simManager.setTop(dut)
-      simManager.runSim(this)
+      simManager.runSim()
+    }
+  }
+
+  def realtimePrintInstruction(): Unit = {
+    simManager.onReset {
+      val start_pc = BigInt(top.dut.getRVCfg.initPcAddr)
+      println(s"pc: ${start_pc.toString(16)}, inst: ${iAddrInstrMap(start_pc)}")
+      top.pushAsciiInstr(iAddrInstrMap(start_pc))
+    }
+    simManager always {
+      val pc = top.getPC
+      val inst = iAddrInstrMap.getOrElse(pc, "nop")
+      println(s"pc: ${pc.toString(16)}, inst: $inst")
+      top.pushAsciiInstr(inst)
+    }
+  }
+
+  def timeLimitOn(timeLimit: Int): Unit = {
+    simManager initial {
+      top.clockDomain.waitSampling(timeLimit)
+      simManager fail("The test reach the time limit, possibly due to the deadlock in the design. Fix it or enlarge the limit.")
     }
   }
 
@@ -48,12 +69,12 @@ class RocRVTest[T <: RocRVDut](top: => RocRvTestTop[T]) {
 object RocRVTest {
 
   class RocRvSim[T <: RocRVDut] {
-    var _cppFilePath: String = _
+    var _srcFilePath: String = _
     var _cpu: ()=> T = _
     var _simConfig: SpinalSimConfig = SimConfig.withWave.allOptimisation.workspacePath("tb")
     private var _test: RocRVTest[T] = _
     def compile(cppFilePath: String): this.type = {
-      _cppFilePath = cppFilePath
+      _srcFilePath = cppFilePath
       this
     }
     def simulate(cpu: => T): this.type = {
@@ -67,7 +88,6 @@ object RocRVTest {
     private def genTest(): Unit = {
       if (_test == null){
         _test = new RocRVTest[T](new RocRvTestTop[T](_cpu))
-        _test.convertSource(_cppFilePath).readDumpFile()
       }
     }
     def top = {
@@ -78,6 +98,8 @@ object RocRVTest {
       genTest()
       _test.simManager.top.dut
     }
+    def runtimeRecord(): Unit = _test.realtimePrintInstruction()
+    def timeLimitOn(cycle: Int): Unit = _test.timeLimitOn(cycle)
     def initial(block: => Unit): Unit = {
       genTest()
       _test.simManager.initial(block)
@@ -102,7 +124,12 @@ object RocRVTest {
     }
     def ! : Unit = {
       genTest()
+      _test.convertSource(_srcFilePath).readDumpFile()
       _test.doSimulate(_simConfig)
+    }
+    def run(src: String): Unit = {
+      compile(src)
+      this !
     }
   }
 
